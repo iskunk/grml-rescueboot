@@ -1,0 +1,58 @@
+#!/bin/bash
+# Filename:      rescueboot
+# Purpose:       Interactive script to reboot into a grml-rescueboot image
+# Authors:       Daniel Richard G. <skunk@iSKUNK.ORG>
+# License:       This file is licensed under the GPL v2+.
+################################################################################
+
+grub_cfg=/boot/grub/grub.cfg
+
+get_grub_cfg_grml_section()
+{
+  sed -n '/^### BEGIN .*\/42_grml ###/,/^### END .*\/42_grml ###/p' $grub_cfg
+}
+
+generate_menu()
+{
+  get_grub_cfg_grml_section \
+  | perl -ne '/^ *menuentry "([^\t"]+)" \$menuentry_id_option "([^\t "]+)" \{$/ and print "$2\n$1\n"'
+}
+
+if ! generate_menu | grep -q .
+then
+  echo "$0: no grml-rescueboot images are installed"
+  exit 1
+fi
+
+submenu=
+if get_grub_cfg_grml_section | grep -q '^submenu .* "grml-rescueboot" {$'
+then
+  submenu='grml-rescueboot>'
+fi
+
+IFS='
+'
+
+id=$(whiptail \
+	--title 'Rescue boot image selection' \
+	--notags \
+	--menu 'Choose one of the following to reboot the system:' 16 75 6 \
+	$(generate_menu) \
+	3>&2 2>&1 1>&3) || exit
+
+echo
+echo "About to reboot the system with \"$id\" !"
+
+unset REPLY
+read -e -p 'To confirm, please enter "reboot": '
+echo
+
+if [ "_$REPLY" = _reboot ]
+then
+  (set -x; : grub-reboot "$submenu$id" && : reboot) || exit
+else
+  echo 'Reboot not confirmed.'
+  exit 1
+fi
+
+## END OF FILE #################################################################

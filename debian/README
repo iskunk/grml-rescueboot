@@ -11,6 +11,11 @@ grml-rescueboot includes the script 42_grml which is installed in
 /etc/grub.d and run when update-grub is executed. The script looks for
 ISO images in /boot/grml/ and adds an entry for each image found.
 
+The GRUB entries can be customized by placing a file <isoname>.iso.cfg
+alongside <isoname>.iso, with appropriate GRUB commands. Even greater
+customization is possible with a shell script <isoname>.iso.cfg.sh, which
+will be run to generate the full GRUB menu entry.
+
 Howto
 -----
 

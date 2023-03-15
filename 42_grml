@@ -74,10 +74,18 @@ get_dependencies() {
     break
   done
   echo $dependencies
-
 }
 
-
+get_iso_identifier()
+{
+  local iso=${1}
+  local id=
+  if isoinfo --version >/dev/null 2>&1 ; then
+    id=$(isoinfo -d -i $iso | grep '^Volume id:' | sed -e 's/^[^:]*: *//')
+    [ -n "$id" ] || id=$(isoinfo -d -i $iso | grep '^Application id:' | sed -e 's/^[^:]*: *//')
+  fi
+  echo "$id"
+}
 
 iso_list=""
 for file in "${ISO_LOCATION}"/*.iso ; do
@@ -85,6 +93,13 @@ for file in "${ISO_LOCATION}"/*.iso ; do
        iso_list="$iso_list $file "
      fi
 done
+
+indent='        '
+submenu_indent=
+if [ -n "$GRUB_SUBMENU" ] ; then
+  echo "submenu \"$GRUB_SUBMENU\" \$menuentry_id_option \"grml-rescueboot\" {"
+  submenu_indent="$indent"
+fi
 
 for grmliso in $iso_list ; do
   rel_dirname="$(dirname $(make_system_path_relative_to_its_root $grmliso))"
@@ -110,24 +125,63 @@ for grmliso in $iso_list ; do
     ;;
   esac
 
-  echo "Found Grml ISO image: $grmliso" >&2
-  title="Grml Rescue System ($grml)"
-  grub_prep=$(prepare_grub_to_access_device "$device" | sed -e "s/^/        /")
+  echo "Found grml-rescueboot ISO image: $grmliso" >&2
+  iso_id=$(get_iso_identifier $grmliso)
+  if [ -n "$iso_id" ] ; then
+    title="$iso_id ($grml)"
+  else
+    title="$grml"
+  fi
+  grub_prep=$(prepare_grub_to_access_device "$device" | sed -e "s/^/$indent/")
+  grub_iso_path="${rel_dirname%/}/${grml}"
 
-  cat << EOF
-menuentry "${title}" {
+  if [ -r $grmliso.cfg.sh ] ; then
+    # option 1: user shell script to generate full menuentry block
+    (export grub_prep grub_iso_path; . $grmliso.cfg.sh) | sed -e "s/^/$submenu_indent/"
+  elif [ -r $grmliso.cfg ] ; then
+    if grep -q '^menuentry ' $grmliso.cfg ; then
+      # option 2: user .cfg file with full menuentry block
+      sed -e "s/^/$submenu_indent/" $grmliso.cfg
+    else
+      # option 3: user .cfg file with only boot commands
+      sed -e "s/^/$submenu_indent/" << EOF
+menuentry "${title}" \$menuentry_id_option "$grml" {
 ${grub_prep}
-        iso_path="${rel_dirname%/}/${grml}"
+        iso_path="$grub_iso_path"
+        loopback loop "\$iso_path"
+$(sed -e "s/^/$indent/" $grmliso.cfg)
+}
+EOF
+    fi
+  else
+    # option 4 (default): we generate full menuentry block
+    sed -e "s/^/$submenu_indent/" << EOF
+menuentry "${title}" \$menuentry_id_option "$grml" {
+${grub_prep}
+        iso_grub_dev="\$root"
+        export iso_grub_dev
+        iso_path="$grub_iso_path"
         export iso_path
         kernelopts=" $CUSTOM_BOOTOPTIONS $additional_param "
         export kernelopts
         # support booting recent GRUB versions on UEFI systems
+        # (see bugs.debian.org/959425)
         rmmod tpm
-        loopback loop "${rel_dirname%/}/$grml"
+        loopback loop "\$iso_path"
         set root=(loop)
         configfile /boot/grub/loopback.cfg
+        unset root
+        loopback -d loop
+        unset iso_grub_dev
+        unset iso_path
+        unset kernelopts
 }
 EOF
+  fi
 done
+
+if [ -n "$GRUB_SUBMENU" ] ; then
+  echo "} # end submenu \"$GRUB_SUBMENU\""
+fi
 
 ## END OF FILE #################################################################
